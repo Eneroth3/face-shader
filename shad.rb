@@ -76,5 +76,22 @@ module ShadeTest
 
 end
 
-# Select face and run:
-ShadeTest.shade_face_color(Sketchup.active_model.selection.first)
+class TestTool
+
+  def activate
+    Sketchup.active_model.active_view.invalidate
+  end
+
+  def draw(view)
+    view.model.active_entities.each do |face|
+      next unless face.is_a?(Sketchup::Face)
+      view.draw_points([face.bounds.center], 10, 2, ShadeTest.shade_face_color(face))
+    end
+  end
+
+  def resume(view)
+    view.invalidate
+  end
+
+end
+Sketchup.active_model.select_tool(TestTool.new)
