@@ -15,14 +15,14 @@ module ShadeTest
   def self.shade_value(normal, view)
     si = view.model.shadow_info
     reference =
-      if si["UseSunForAllShading"]
+      if sun_for_shading?
         si["SunDirection"]
       else
         (view.camera.eye - view.camera.target).normalize
       end
       value = normal % reference
 
-      si["UseSunForAllShading"] ? [value, 0].max : value.abs
+      sun_for_shading? ? [value, 0].max : value.abs
   end
 
   # Check what side of face is being viewed.
@@ -62,8 +62,8 @@ module ShadeTest
 
   def self.shade_color(color, normal, view)
     si = view.model.shadow_info
-    light = si["UseSunForAllShading"] ? si["Light"]/100.0 : 0.81
-    dark = si["UseSunForAllShading"] ? si["Dark"]/100.0 : 0.2
+    light = sun_for_shading? ? si["Light"]/100.0 : 0.81
+    dark = sun_for_shading? ? si["Dark"]/100.0 : 0.2
     shading = shade_value(normal, view)
     shift = 0.2 + dark + shading*light
 
@@ -72,6 +72,12 @@ module ShadeTest
 
   def self.shade_face_color(face)
     shade_color(face_color(face), face.normal, face.model.active_view)
+  end
+
+  def sun_for_shading?(si)
+    # If shadows are enabled SketchUp uses sun for shading regardless of
+    # the UseSunForAllShading setting.
+    si["UseSunForAllShading"] || si["DisplayShadows"]
   end
 
 end
