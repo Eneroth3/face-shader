@@ -1,14 +1,20 @@
 module FaceShading
 
-  # Get color of face (not shaded).
+  # Get the (unshaded) color of viewed side of a face.
   # If face has texture, simply return the average color.
   # For now material inherited from parent group/component is ignored.
   #
-  # face - A Face Entity.
+  # face   - A Face Entity.
+  # plane  - Plane used to determine what side of faces is viewed expressed
+  #          according to Geom documentation (default: face's plane).
+  # camera - A Camera object (default: the camera of the same model face is in).
   #
   # Returns Color object.
-  def self.face_color(face)
-    if view_back_face?(face)
+  def self.face_color(face, plane = nil, camera = nil)
+    plane ||= face.plane
+    camera ||= face.model.active_view.camera
+
+    if back_of_plane?(plane, camera.eye)
       if face.back_material
         face.back_material.color
       else
@@ -23,50 +29,66 @@ module FaceShading
     end
   end
 
-  # Shade a color as it would be shaded if drawn to a face with a certain normal
+  # Shade a color as it would be shaded if drawn to a face at a certain plane
   # and shown in a certain view.
   #
   # color  - Color object to base shaded color of.
-  # normal - Vector3d.
+  # plane  - Plane used for shading expressed according to Geom documentation.
   # view   - View object.
-  def self.shade_color(color, normal, view)
+  def self.shade_color(color, plane, view)
     si = view.model.shadow_info
     light = sun_for_shading?(si) ? si["Light"]/100.0 : 0.81
     dark = sun_for_shading?(si) ? si["Dark"]/100.0 : 0.2
-    shading = shade_value(normal, view)
+    shading = shade_value(plane, view)
     shift = 0.2 + dark + shading*light
 
     Sketchup::Color.new(*color.to_a[0, 3].map { |c| [(c*shift).to_i, 255].min })
   end
 
-  # Get the shaded color of a face.
+  # Get the shaded color of viewed side of a face.
   #
-  # face - A Face.
+  # face  - A Face.
+  # plane - Plane used for shading expressed according to Geom documentation
+  #         (default: face's plane).
   #
   # Returns Color.
-  def self.shaded_face_color(face)
-    shade_color(face_color(face), face.normal, face.model.active_view)
+  def self.shaded_face_color(face, plane = nil)
+    plane ||= face.plane
+
+    shade_color(face_color(face, plane), plane, face.model.active_view)
   end
 
   # Check what side of face is being viewed.
   # Assume face is in same coordinate system as camera.
   #
-  # face - A Face entity.
-  # camera - A Camera object (default: the camera of the same model fce is in).
+  # face   - A Face entity.
+  # camera - A Camera object (default: the camera of the same model face is in).
   #
   # Returns Boolean.
   def self.view_back_face?(face, camera = nil)
     camera ||= face.model.active_view.camera
-    (camera.eye - camera.eye.project_to_plane(face.plane)) % face.normal < 0
+
+    back_of_plane?(face.plane, camera.eye)
   end
 
   private
 
+  def self.back_of_plane?(plane, point)
+    (point - point.project_to_plane(plane)) % plane_normal(plane) < 0
+  end
+
+  def self.plane_normal(plane)
+    return plane[1].clone if plane.size == 2
+    a, b, c, _ = plane
+
+    Geom::Vector3d.new(a, b, c)
+  end
+
   # Returns Float in interval 0.0 to 1.0 of how much face should be shaded,
   # 0.0 being the darkest and 1.0 lightest.
   #
-  # normal - Normal Vector3d.
-  # view   - Sketchup::View object.
+  # plane - Plane used for shading expressed according to Geom documentation.
+  # view  - Sketchup::View object.
   #
   # Examples
   #
@@ -74,17 +96,19 @@ module FaceShading
   #   shade_value(model.selection.first.normal, model.active_view)
   #
   # Returns float.
-  def self.shade_value(normal, view)
+  def self.shade_value(plane, view)
     si = view.model.shadow_info
+    normal = plane_normal(plane)
+    normal.reverse! if back_of_plane?(plane, view.camera.eye)
     reference =
       if sun_for_shading?(si)
         si["SunDirection"]
       else
         (view.camera.eye - view.camera.target).normalize
       end
-      value = normal % reference
+    value = normal.normalize % reference
 
-      sun_for_shading?(si) ? [value, 0].max : value.abs
+    sun_for_shading?(si) ? [value, 0].max : value.abs
   end
 
   def self.sun_for_shading?(si)
@@ -94,29 +118,3 @@ module FaceShading
   end
 
 end
-
-# Test code to see that calculated color really matches the one SketchUp
-# uses for face shading.
-#
-# If customs hading code is successful the points drawn by TestTool should being
-# invisible unless they represent a face hidden behind another face or cover
-# their faces' edges.
-class TestTool
-
-  def activate
-    Sketchup.active_model.active_view.invalidate
-  end
-
-  def draw(view)
-    view.model.active_entities.each do |face|
-      next unless face.is_a?(Sketchup::Face)
-      view.draw_points([face.bounds.center], 10, 2, FaceShading.shaded_face_color(face))
-    end
-  end
-
-  def resume(view)
-    view.invalidate
-  end
-
-end
-Sketchup.active_model.select_tool(TestTool.new)
